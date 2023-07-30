@@ -1,0 +1,105 @@
+- name: configure react node
+  hosts: _ansible_react
+  become: true
+  tasks:
+    - name: update packages
+      yum: 
+        name: "*"
+        state: latest
+    
+    - name: uninstall old versions
+      yum:
+        name: "{{ item }}"
+        state: removed
+      loop:
+        - docker
+        - docker-client
+        - docker-client-latest 
+        - docker-common
+        - docker-latest
+        - docker-latest-logrotate
+        - docker-logrotate 
+        - docker-engine 
+
+    - name: install yum-utils
+      yum:
+        name: yum-utils
+        state: latest
+
+    - name: add docker repo
+      get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+
+    - name: install docker
+      package: 
+        name: docker-ce
+        state: latest
+    
+    - name: install pip
+      package:
+        name: python3-pip
+        state: present
+
+    - name: install docker sdk
+      pip: 
+        name: docker
+
+    - name: add ec2-user to docker group
+      user: 
+        name: ec2-user
+        groups: docker
+        append: yes
+
+# usermod -a -G docker ec2-user
+
+    - name: start docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+    
+    - name: create build directory
+      file: 
+        path: /home/ec2-user/nodejs
+        state: directory
+        owner: root
+        group: root
+        mode: "0755" 
+# at this point do not forget to change DB_HOST  env variable for postgresql node
+
+    - name: copy rect client files into react node
+      copy:
+        src: /home/ec2-user/ansible/ansible-project/react/client/
+        dest: /home/ec2-user/react
+    
+    - name: copy Dockerfile into react node
+      copy:
+        src: /home/ec2-user/ansible/ansible-project/react/Dockerfile
+        dest: /home/ec2-user/react
+
+    - name: remove container and image if exist
+      shell: "docker ps -q --filter 'name=kodal035_react' && docker stop kodal035_react \
+      && docker rm -fv kodal035_react && docker image rm -f kodal035/react-image || echo 'Not Found'"
+
+    - name: build container image
+      docker_image:
+        name: kodal035/react-image
+        build: 
+          path: /home/ec2-user/react
+        source: build
+        state: present
+
+    - name: create nosejs docker container 
+      docker_container:
+        name: kodal035_react
+        image: kodal035/react-image
+        state: started
+        ports: 
+          - "3000:3000"
+        
+      register: container_info
+
+    - name: print the container info
+      debug:
+        var: container_info
